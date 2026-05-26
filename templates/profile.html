@@ -39,6 +39,9 @@
 .add-btn{margin-top:4px}
 .quick-sync-btn{background:none;border:none;color:var(--text-muted);cursor:pointer;font-size:1.1rem;transition:color 0.2s;display:flex;align-items:center}
 .quick-sync-btn:hover,.quick-sync-btn:focus-visible{color:var(--accent)}
+.chart-export-btn{background:none;border:none;color:var(--text-muted);cursor:pointer;font-size:1.1rem;transition:color 0.2s;width:24px;display:flex;align-items:center;justify-content:center}
+.chart-export-btn:hover,.chart-export-btn:focus-visible{color:var(--accent)}
+.college-item{padding:9px 14px;cursor:pointer;font-size:.83rem;border-bottom:1px solid var(--border-subtle);display:flex;justify-content:space-between;align-items:center;transition:background .15s}
 .upload-photo-label{display:inline-flex;align-items:center;gap:6px;padding:6px 14px;border:1px solid var(--border-color);border-radius:8px;cursor:pointer;font-size:.8rem;color:var(--text-secondary);transition:all .2s}
 .upload-photo-label:hover,.upload-photo-label:focus-within{border-color:var(--accent);color:var(--accent)}
 .rank-card{background:linear-gradient(135deg,rgba(255,107,0,.08),rgba(255,55,95,.06));border:1px solid var(--border-color);border-radius:14px;padding:14px}
@@ -436,7 +439,7 @@ body.modal-open {
     <!-- DSA difficulty -->
     <div style="font-size:.8rem;font-weight:700;display:flex;justify-content:space-between;align-items:center;color:var(--text-secondary);margin-bottom:12px">
       <span style="flex:1;text-align:center;padding-left:24px">DSA</span>
-      <button onclick="exportChart('difficultyChart', 'dsa-difficulty.png')" title="Export Chart as Image" style="background:none;border:none;color:var(--text-muted);cursor:pointer;font-size:1.1rem;transition:color 0.2s;width:24px" onmouseover="this.style.color='var(--accent)'" onmouseout="this.style.color='var(--text-muted)'" aria-label="Export difficulty chart">
+      <button id="exportDifficultyChartBtn" class="chart-export-btn" title="Export Chart as Image" aria-label="Export difficulty chart">
         <i class="bi bi-download" aria-hidden="true"></i>
       </button>
     </div>
@@ -465,7 +468,7 @@ body.modal-open {
     <!-- Contest Rankings -->
     <div style="font-size:.8rem;font-weight:700;display:flex;justify-content:space-between;align-items:center;color:var(--text-secondary);margin-bottom:4px">
       <span style="flex:1;text-align:center;padding-left:24px">Contest Rankings</span>
-      <button onclick="exportChart('progressChart', 'rating-history.png')" title="Export Chart as Image" style="background:none;border:none;color:var(--text-muted);cursor:pointer;font-size:1.1rem;transition:color 0.2s;width:24px" onmouseover="this.style.color='var(--accent)'" onmouseout="this.style.color='var(--text-muted)'" aria-label="Export rating chart">
+      <button id="exportProgressChartBtn" class="chart-export-btn" title="Export Chart as Image" aria-label="Export rating chart">
         <i class="bi bi-download" aria-hidden="true"></i>
       </button>
     </div>
@@ -583,19 +586,18 @@ const endpointConfig = {{ {
 }|tojson }};
 const csrfToken = {{ csrf_token()|tojson }};
 
-// ── Event Listeners (registered first so Chart.js failure can't break them) ──
+const q = s => document.getElementById(s);
+const qAll = s => document.querySelectorAll(s);
+const listen = (el, ev, cb, opt) => el?.addEventListener(ev, cb, opt);
+
 window.handleSaveProfile = function(btn){
-  const contentEl=document.getElementById('saveProfileContent');
+  const contentEl=q('saveProfileContent');
+  const val = id => q(id).value;
   const payload={
-    name: document.getElementById('ep_name').value,
-    bio: document.getElementById('ep_bio').value,
-    headline: document.getElementById('ep_headline').value,
-    location: document.getElementById('ep_location').value,
-    college: document.getElementById('ep_college').value,
-    linkedin_url: document.getElementById('ep_linkedin').value,
-    twitter_url: document.getElementById('ep_twitter').value,
-    website_url: document.getElementById('ep_website').value,
-    resume_url: document.getElementById('ep_resume').value,
+    name: val('ep_name'), bio: val('ep_bio'), headline: val('ep_headline'),
+    location: val('ep_location'), college: val('ep_college'),
+    linkedin_url: val('ep_linkedin'), twitter_url: val('ep_twitter'),
+    website_url: val('ep_website'), resume_url: val('ep_resume'),
   };
   window.setButtonBusyState(btn, contentEl, { busy: true, busyLabel: 'Saving...' });
   fetch(endpointConfig.editProfile,{method:'POST',headers:{'Content-Type':'application/json','X-CSRFToken':csrfToken},body:JSON.stringify(payload)})
@@ -609,74 +611,50 @@ window.handleSaveProfile = function(btn){
         showToast('❌ Error: '+(res.error||'unknown'));
         window.setButtonBusyState(btn, contentEl, { busy: false });
       }
-    }).catch(e=>{
+    }).catch(()=>{
       showToast('❌ Network error');
       window.setButtonBusyState(btn, contentEl, { busy: false });
     });
 };
 
 window.handleQuickSync = function(btn) {
-  const icon = document.getElementById('quickSyncIcon');
+  const icon = q('quickSyncIcon');
   if (btn.disabled) return;
-  
   const lc = '{{ user.leetcode_username or "" }}';
   const gh = '{{ user.github_username or "" }}';
   const gfg = '{{ user.gfg_username or "" }}';
   const hr = '{{ user.hackerrank_username or "" }}';
   const cn = '{{ user.codingninjas_username or "" }}';
   const ac = '{{ user.atcoder_username or "" }}';
-  
-  if(!lc && !gh && !gfg && !hr && !cn && !ac){
-    showToast('⚠️ No platforms connected to sync!');
-    return;
-  }
-
+  if(!lc && !gh && !gfg && !hr && !cn && !ac) return showToast('⚠️ No platforms connected to sync!');
   btn.disabled = true;
   window.setIconBusyState(icon, { busy: true, idleClassName: 'bi bi-arrow-clockwise' });
   showToast('⏳ Syncing profiles...');
-  
   fetch(endpointConfig.syncPlatforms, {
-    method:'POST',
-    headers:{'Content-Type':'application/json','X-CSRFToken':csrfToken},
+    method:'POST',headers:{'Content-Type':'application/json','X-CSRFToken':csrfToken},
     body:JSON.stringify({leetcode:lc,github:gh,gfg:gfg,hackerrank:hr,codingninjas:cn,atcoder:ac})
   })
   .then(r => r.json())
   .then(res => {
-    btn.disabled = false;
-    window.setIconBusyState(icon, { busy: false });
+    btn.disabled = false; window.setIconBusyState(icon, { busy: false });
     if(res.success){
       showToast('✅ Synced successfully! Reloading...');
       setTimeout(()=>window.location.reload(), 1200);
-    } else {
-      showToast('❌ Sync failed: ' + (res.error || 'unknown'));
-    }
+    } else showToast('❌ Sync failed: ' + (res.error || 'unknown'));
   })
-  .catch(err => {
-    btn.disabled = false;
-    window.setIconBusyState(icon, { busy: false });
+  .catch(() => {
+    btn.disabled = false; window.setIconBusyState(icon, { busy: false });
     showToast('❌ Network error. Check connection.');
   });
 };
 
 window.handleSyncProfile = function(btn){
-  const syncContent=document.getElementById('syncBtnContent');
-  const lc=document.getElementById('lc_username').value.trim();
-  const gh=document.getElementById('gh_username').value.trim();
-  const gfg=document.getElementById('gfg_username').value.trim();
-  const hr=document.getElementById('hr_username').value.trim();
-  const cn=document.getElementById('cn_username').value.trim();
-  const ac=document.getElementById('ac_username').value.trim();
-  if(!lc && !gh && !gfg && !hr && !cn && !ac){showToast('\u26a0\ufe0f Enter at least one username');return;}
-
-  // Disable button & show spinner
+  const syncContent=q('syncBtnContent'), valTrim=id=>q(id).value.trim();
+  const lc=valTrim('lc_username'), gh=valTrim('gh_username'), gfg=valTrim('gfg_username'), hr=valTrim('hr_username'), cn=valTrim('cn_username'), ac=valTrim('ac_username');
+  if(!lc && !gh && !gfg && !hr && !cn && !ac) return showToast('\u26a0\ufe0f Enter at least one username');
   window.setButtonBusyState(btn, syncContent, { busy: true, busyLabel: 'Syncing...' });
-
-  // Show loading overlay
-  const overlay=document.getElementById('syncOverlay');
-  overlay.style.display='flex';
-  document.getElementById('syncOverlayMsg').textContent='Syncing your profiles...';
-
-  // Animate step indicators
+  const overlay=q('syncOverlay'); overlay.style.display='flex';
+  q('syncOverlayMsg').textContent='Syncing your profiles...';
   const syncPlatforms=[
     {id:'ss_lc', label:'LeetCode', value:lc},
     {id:'ss_gh', label:'GitHub', value:gh},
@@ -691,83 +669,57 @@ window.handleSyncProfile = function(btn){
     ${index?'<span style="color:rgba(255,255,255,.2)">·</span>':''}
     <span id="${platform.id}" style="font-size:.75rem;color:rgba(255,255,255,.4)">&#9675; ${platform.label}</span>
   `).join('');
-
   const steps=activeSyncPlatforms.map(platform=>platform.id);
   const labels=activeSyncPlatforms.map(platform=>platform.label);
   let si=0;
   const stepTimer=setInterval(()=>{
-    if(si>0) document.getElementById(steps[si-1]).style.color='rgba(0,200,100,.8)';
-    if(si<steps.length){
-      document.getElementById(steps[si]).style.color='#fff';
-      document.getElementById('syncOverlayMsg').textContent='Syncing '+labels[si]+'...';
-      si++;
-    }else clearInterval(stepTimer);
+    if(si>0) q(syncPlatforms[si-1].id).style.color='rgba(0,200,100,.8)';
+    if(si<syncPlatforms.length){ q(syncPlatforms[si].id).style.color='#fff'; q('syncOverlayMsg').textContent='Syncing '+labels[si]+'...'; si++; }
+    else clearInterval(stepTimer);
   }, 6000);
-
-  // Fetch with 90s timeout
-  const ctrl=new AbortController();
-  const timer=setTimeout(()=>ctrl.abort(),90000);
-
+  const ctrl=new AbortController(); const timer=setTimeout(()=>ctrl.abort(),90000);
   fetch(endpointConfig.syncPlatforms,{
-    method:'POST',
-    headers:{'Content-Type':'application/json','X-CSRFToken':csrfToken},
+    method:'POST',headers:{'Content-Type':'application/json','X-CSRFToken':csrfToken},
     body:JSON.stringify({leetcode:lc,github:gh,gfg:gfg,hackerrank:hr,codingninjas:cn,atcoder:ac}),
     signal:ctrl.signal
   })
   .then(r=>{clearTimeout(timer);return r.json();})
   .then(res=>{
-    clearInterval(stepTimer);
-    overlay.style.display='none';
+    clearInterval(stepTimer); overlay.style.display='none';
     if(res.success){
       syncContent.innerHTML='<i class="bi bi-check-lg"></i> Synced!';
       showToast('\u2705 Synced successfully! Reloading...');
       setTimeout(()=>window.location.reload(),1200);
-    }else{
-      window.setButtonBusyState(btn, syncContent, { busy: false });
-      showToast('\u274c Sync failed: '+(res.error||'unknown'));
-    }
+    }else{ window.setButtonBusyState(btn, syncContent, { busy: false }); showToast('\u274c Sync failed: '+(res.error||'unknown')); }
   })
   .catch(err=>{
-    clearInterval(stepTimer);
-    overlay.style.display='none';
-    window.setButtonBusyState(btn, syncContent, { busy: false });
-    if(err.name==='AbortError'){
-      showToast('\u23f0 Sync timed out. Try again.');
-    }else{
-      showToast('\u274c Network error. Check connection.');
-    }
-    console.error('Sync error:',err);
+    clearInterval(stepTimer); overlay.style.display='none'; window.setButtonBusyState(btn, syncContent, { busy: false });
+    showToast(err.name==='AbortError'?'\u23f0 Sync timed out. Try again.':'\u274c Network error. Check connection.');
   });
 };
 
-const dailyCounts = {{ daily_counts | tojson }};
-const heatmap = document.getElementById('heatmap');
+const dailyCounts = {{ daily_counts | tojson }}, heatmap = q('heatmap');
 function exportChart(id,file){
-  const c=document.getElementById(id);if(!c)return;
+  const c=q(id);if(!c)return;
   const o=document.createElement('canvas'),x=o.getContext('2d'),a=document.createElement('a');
   o.width=c.width;o.height=c.height;x.fillStyle='#1e2327';x.fillRect(0,0,o.width,o.height);x.drawImage(c,0,0);
   a.download=file;a.href=o.toDataURL('image/png');a.click();
 }
-function markChartReady(id){
-  const shell = document.getElementById(id);
-  if (shell) shell.classList.add('is-ready');
-}
-const today = new Date();
-const days = 168;
-let start = new Date(); start.setDate(today.getDate() - days + 1);
-for(let i=0;i<days;i++){
+const markChartReady = id => q(id)?.classList.add('is-ready');
+const start = new Date(); start.setDate(new Date().getDate() - 167);
+for(let i=0;i<168;i++){
   let d=new Date(start); d.setDate(d.getDate()+i);
   let ds=d.toISOString().split('T')[0];
   let c=dailyCounts[ds]||0, l=0;
   if(c>0&&c<=2)l=1; else if(c>2&&c<=5)l=2; else if(c>5&&c<=10)l=3; else if(c>10)l=4;
   let el=document.createElement('div');
-  el.className='hm-cell'; el.dataset.l=l; el.title=ds+': '+c+' submissions';
+  el.className='hm-cell'; el.dataset.l=l; el.title=`${ds}: ${c} submissions`;
   heatmap.appendChild(el);
 }
 
 const ratingHistory = {{ rating_history | tojson }};
 const cumData = {{ cumulative_data | tojson }};
-const chartCanvas = document.getElementById('progressChart');
+const chartCanvas = q('progressChart');
 const chartData = ratingHistory.length > 0 ? ratingHistory : cumData;
 if(chartData.length > 0 && chartCanvas && typeof Chart !== 'undefined'){
   new Chart(chartCanvas,{
@@ -780,93 +732,60 @@ if(chartData.length > 0 && chartCanvas && typeof Chart !== 'undefined'){
   const ctx = chartCanvas.getContext('2d');
   ctx.fillStyle = 'rgba(255,255,255,0.08)';
   ctx.fillRect(0,0,chartCanvas.width,chartCanvas.height);
-  ctx.fillStyle = '#555';
-  ctx.font = '13px Inter, sans-serif';
-  ctx.textAlign = 'center';
+  ctx.fillStyle = '#555'; ctx.font = '13px Inter, sans-serif'; ctx.textAlign = 'center';
   ctx.fillText('Sync LeetCode to see rating chart', chartCanvas.width/2, chartCanvas.height/2 - 8);
   markChartReady('progressChartShell');
 }
 
 const pData = {{ platforms | tojson }};
-try{new Chart(document.getElementById('platformsChart'),{
+const chartOpts = {responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}}};
+try{new Chart(q('platformsChart'),{
   type:'doughnut',
   data:{labels:['LeetCode','GFG','Coding Ninjas','HackerRank','Other'],datasets:[{data:[pData['LeetCode'],pData['GFG'],pData['Coding Ninjas'],pData['HackerRank'],pData['Other']],backgroundColor:['#ffb800','#22c55e','#8b5cf6','#00bd6c','#6c757d'],borderWidth:0,cutout:'78%'}]},
-  options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}}}
-}); markChartReady('platformsChartShell');}catch(e){console.warn('Chart.js load failed:',e); markChartReady('platformsChartShell');}
+  options:chartOpts
+}); markChartReady('platformsChartShell');}catch(e){markChartReady('platformsChartShell');}
 
-try{new Chart(document.getElementById('difficultyChart'),{
+try{new Chart(q('difficultyChart'),{
   type:'doughnut',
   data:{labels:['Easy','Medium','Hard'],datasets:[{data:[{{lc_easy}},{{lc_medium}},{{lc_hard}}],backgroundColor:['#00b8a3','#ffc01e','#ff375f'],borderWidth:0,cutout:'78%'}]},
-  options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}}}
-}); markChartReady('difficultyChartShell');}catch(e){console.warn('Difficulty chart error:',e); markChartReady('difficultyChartShell');}
+  options:chartOpts
+}); markChartReady('difficultyChartShell');}catch(e){markChartReady('difficultyChartShell');}
 
-function openSyncModal(){document.getElementById('syncModal').classList.add('open')}
-function closeSyncModal(){document.getElementById('syncModal').classList.remove('open')}
-function showCodelioCard(){document.getElementById('cardModal').classList.add('open')}
-function openEditProfile(){document.getElementById('editProfileModal').classList.add('open')}
-function closeEditProfile(){document.getElementById('editProfileModal').classList.remove('open')}
+const openSyncModal = () => q('syncModal').classList.add('open');
+const closeSyncModal = () => q('syncModal').classList.remove('open');
+const showCodelioCard = () => q('cardModal').classList.add('open');
+const openEditProfile = () => q('editProfileModal').classList.add('open');
 
-document.querySelectorAll('[data-action="open-sync-modal"]').forEach((trigger) => {
-  trigger.addEventListener('click', (event) => {
-    event.preventDefault();
-    openSyncModal();
-  });
-});
+qAll('[data-action="open-sync-modal"]').forEach(t => listen(t, 'click', e => { e.preventDefault(); openSyncModal(); }));
+listen(q('showCodolioCardBtn'), 'click', showCodelioCard);
+listen(q('copyProgressCardBtn'), 'click', copyProgressCardUrl);
+listen(q('openEditProfileBtn'), 'click', openEditProfile);
+listen(q('openDeleteAccountBtn'), 'click', () => typeof window.openDeleteModal === 'function' && window.openDeleteModal());
+listen(q('quickSyncBtn'), 'click', function() { window.handleQuickSync(this); });
+listen(q('btnSync'), 'click', function() { window.handleSyncProfile(this); });
+listen(q('btnSaveProfile'), 'click', function() { window.handleSaveProfile(this); });
+listen(q('shareCardBtn'), 'click', () => showToast('Profile card copied! 📋'));
+listen(q('photoInput'), 'change', handlePhotoUpload);
 
-document.getElementById('showCodolioCardBtn')?.addEventListener('click', () => {
-  showCodelioCard();
-});
+listen(q('exportDifficultyChartBtn'), 'click', () => exportChart('difficultyChart', 'dsa-difficulty.png'));
+listen(q('exportProgressChartBtn'), 'click', () => exportChart('progressChart', 'rating-history.png'));
 
-document.getElementById('copyProgressCardBtn')?.addEventListener('click', () => {
-  copyProgressCardUrl();
-});
-
-document.getElementById('openEditProfileBtn')?.addEventListener('click', () => {
-  openEditProfile();
-});
-
-document.getElementById('openDeleteAccountBtn')?.addEventListener('click', () => {
-  if (typeof window.openDeleteModal === 'function') {
-    window.openDeleteModal();
-  }
-});
-
-document.getElementById('quickSyncBtn')?.addEventListener('click', function() {
-  window.handleQuickSync(this);
-});
-
-document.getElementById('btnSync')?.addEventListener('click', function() {
-  window.handleSyncProfile(this);
-});
-
-document.getElementById('btnSaveProfile')?.addEventListener('click', function() {
-  window.handleSaveProfile(this);
-});
-
-document.getElementById('shareCardBtn')?.addEventListener('click', () => {
-  showToast('Profile card copied! 📋');
-});
-
-document.getElementById('photoInput')?.addEventListener('change', handlePhotoUpload);
-
-document.querySelectorAll('[data-modal-close]').forEach((trigger) => {
-  trigger.addEventListener('click', () => {
-    const modal = document.getElementById(trigger.dataset.modalClose);
-    if (modal) modal.classList.remove('open');
-  });
-});
+qAll('[data-modal-close]').forEach(t => listen(t, 'click', () => {
+  const m = q(t.dataset.modalClose);
+  if (m) m.classList.remove('open');
+}));
 
 ['syncModal','cardModal','editProfileModal'].forEach(id=>{
-  const el=document.getElementById(id);
-  if(el) el.addEventListener('click',e=>{if(e.target.id===id)el.classList.remove('open');});
+  const el=q(id);
+  if(el) listen(el, 'click', e=>{ if(e.target.id===id) el.classList.remove('open'); });
 });
 
 function handlePhotoUpload(e){
   const file=e.target.files[0];
   if(!file)return;
   if(file.size>2*1024*1024){showToast('❌ Image too large (max 2MB)');return;}
-  const preview=document.getElementById('editAvatarPreview');
-  const mainAvatar=document.getElementById('avatarRing');
+  const preview=q('editAvatarPreview');
+  const mainAvatar=q('avatarRing');
   const fd=new FormData();
   fd.append('photo',file);
   showToast('⏳ Uploading photo...');
@@ -874,91 +793,63 @@ function handlePhotoUpload(e){
     .then(r=>r.json())
     .then(res=>{
       if(res.success){
-        // Safe DOM - create img element without innerHTML
         const makeImg=()=>{const i=document.createElement('img');i.src=res.photo_url;i.style.cssText='width:100%;height:100%;object-fit:cover;border-radius:50%';return i;};
-        preview.textContent='';
-        preview.appendChild(makeImg());
+        preview.textContent=''; preview.appendChild(makeImg());
         if(mainAvatar){mainAvatar.textContent='';const i2=makeImg();i2.style.borderRadius='50%';mainAvatar.appendChild(i2);}
         showToast('✅ Photo updated!');
       } else showToast('❌ '+res.error);
     }).catch(()=>showToast('❌ Upload failed'));
 }
 
-document.querySelectorAll('.award-badge-icon').forEach((badgeIcon) => {
-  badgeIcon.addEventListener('error', () => {
-    const fallback = document.createElement('span');
-    fallback.textContent = '🏅';
-    badgeIcon.replaceWith(fallback);
-  }, { once: true });
-});
+qAll('.award-badge-icon').forEach(b => listen(b, 'error', () => {
+  const s = document.createElement('span'); s.textContent = '🏅'; b.replaceWith(s);
+}, { once: true }));
 
-// ── College/University Autocomplete ──
 (function(){
-  const inp = document.getElementById('ep_college');
-  const dd = document.getElementById('collegeDropdown');
+  const inp = q('ep_college'), dd = q('collegeDropdown');
   if(!inp || !dd) return;
   let timer = null, activeIdx = -1;
-
-  function renderItems(items){
-    dd.innerHTML = '';
-    activeIdx = -1;
-    if(!items.length){ dd.style.display='none'; return; }
-    items.forEach((item, i) => {
-      const div = document.createElement('div');
-      div.style.cssText = 'padding:9px 14px;cursor:pointer;font-size:.83rem;border-bottom:1px solid var(--border-subtle);display:flex;justify-content:space-between;align-items:center;transition:background .15s';
-      const spanName = document.createElement('span');
-      spanName.style.cssText = 'font-weight:600;color:var(--text-primary)';
-      spanName.textContent = item.name;
-      const spanCountry = document.createElement('span');
-      spanCountry.style.cssText = 'font-size:.72rem;color:var(--text-muted)';
-      spanCountry.textContent = item.country;
-      div.appendChild(spanName);
-      div.appendChild(spanCountry);
-      div.dataset.label = item.label;
-      div.addEventListener('mouseenter', () => { setActive(i); });
-      div.addEventListener('click', () => { inp.value = item.label; dd.style.display='none'; });
-      dd.appendChild(div);
-    });
-    dd.style.display='block';
-  }
-
-  function setActive(idx){
-    const children = dd.children;
-    if(activeIdx >= 0 && activeIdx < children.length) children[activeIdx].style.background = '';
+  const setActive = idx => {
+    const ch = dd.children;
+    if(activeIdx >= 0 && activeIdx < ch.length) ch[activeIdx].style.background = '';
     activeIdx = idx;
-    if(activeIdx >= 0 && activeIdx < children.length){
-      children[activeIdx].style.background = 'var(--bg-secondary)';
-      children[activeIdx].scrollIntoView({block:'nearest'});
+    if(activeIdx >= 0 && activeIdx < ch.length){
+      ch[activeIdx].style.background = 'var(--bg-secondary)';
+      ch[activeIdx].scrollIntoView({block:'nearest'});
     }
-  }
-
+  };
   inp.addEventListener('input', function(){
     clearTimeout(timer);
-    const q = this.value.trim();
-    if(q.length < 2){ dd.style.display='none'; return; }
+    const val = this.value.trim();
+    if(val.length < 2) return dd.style.display='none';
     timer = setTimeout(() => {
-      fetch(endpointConfig.searchUniversities + '?q=' + encodeURIComponent(q))
+      fetch(`${endpointConfig.searchUniversities}?q=${encodeURIComponent(val)}`)
         .then(r => r.json())
-        .then(data => renderItems(data))
-        .catch(() => { dd.style.display='none'; });
+        .then(items => {
+          dd.innerHTML = ''; activeIdx = -1;
+          if(!items.length) return dd.style.display='none';
+          items.forEach((item, i) => {
+            const div = document.createElement('div');
+            div.className = 'college-item';
+            div.innerHTML = `<span style="font-weight:600;color:var(--text-primary)">${item.name}</span><span style="font-size:.72rem;color:var(--text-muted)">${item.country}</span>`;
+            div.dataset.label = item.label;
+            listen(div, 'mouseenter', () => setActive(i));
+            listen(div, 'click', () => { inp.value = item.label; dd.style.display='none'; });
+            dd.appendChild(div);
+          });
+          dd.style.display='block';
+        }).catch(() => { dd.style.display='none'; });
     }, 300);
   });
-
-  inp.addEventListener('keydown', function(e){
-    const children = dd.children;
-    if(!children.length || dd.style.display === 'none') return;
-    if(e.key === 'ArrowDown'){ e.preventDefault(); setActive(Math.min(activeIdx+1, children.length-1)); }
+  inp.addEventListener('keydown', e => {
+    const ch = dd.children;
+    if(!ch.length || dd.style.display === 'none') return;
+    if(e.key === 'ArrowDown'){ e.preventDefault(); setActive(Math.min(activeIdx+1, ch.length-1)); }
     else if(e.key === 'ArrowUp'){ e.preventDefault(); setActive(Math.max(activeIdx-1, 0)); }
-    else if(e.key === 'Enter' && activeIdx >= 0){
-      e.preventDefault();
-      inp.value = children[activeIdx].dataset.label;
-      dd.style.display='none';
-    } else if(e.key === 'Escape'){ dd.style.display='none'; }
+    else if(e.key === 'Enter' && activeIdx >= 0){ e.preventDefault(); inp.value = ch[activeIdx].dataset.label; dd.style.display='none'; }
+    else if(e.key === 'Escape'){ dd.style.display='none'; }
   });
-
-  document.addEventListener('click', function(e){
-    if(!inp.contains(e.target) && !dd.contains(e.target)) dd.style.display='none';
-  });
+  listen(document, 'click', e => { if(!inp.contains(e.target) && !dd.contains(e.target)) dd.style.display='none'; });
 })();
 </script>
 {% endblock %}
